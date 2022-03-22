@@ -1,0 +1,94 @@
+import numpy
+import plotly.graph_objects as go
+import numpy as np
+import math
+
+def Phi(x):
+    return 3/2 * math.log(1+x**2)
+
+def Psi(x):
+    return 3/2/(1+x**2)
+
+def F(x,t):
+    return -3/2 * (2+t-x**2)/(1+t+x**2)**2
+
+ASqr = 1/2
+AlphaLeft = 2
+BettaLeft = -1
+AlphaRight = 1
+BettaRight = 0
+
+def GammaLeft(t):
+    return 3*math.log(1+t)
+
+def GammaRight(t):
+    return 3/(2+t)
+
+def SolveFirstOrder(U, h, tau):
+    for n in range(U.shape[1]):
+        U[0][n] = Phi(h * n)
+        U[1][n] = U[0][n] + tau*Psi(h * n)
+
+    for m in range(2, U.shape[0]):
+        for n in range(1, U.shape[1] - 1):
+            U[m][n] = ASqr*tau**2/h**2 *(U[m-1][n+1] - 2*U[m-1][n] + U[m-1][n-1]) + tau*F(h*n, tau*(m-1))\
+                      + 2*U[m-1][n] - U[m-2][n]
+
+    for m in range(2, U.shape[0]):
+        U[m][0] = (GammaLeft(tau*m) - BettaLeft/h * U[m][1]) * h/(AlphaLeft*h - BettaLeft)
+        U[m][U.shape[1] - 1] = GammaRight(tau*m) + U[m][U.shape[1] - 2]
+
+    return U
+
+def SolveSecondOrder(U, h, tau):
+    for n in range(U.shape[1]):
+        U[0][n] = Phi(h * n)
+        U[1][n] = Phi(h * n) + tau*Psi(h * n) + tau**2/2/h**2 * (ASqr**2 * (Phi(h * (n-1)) - 2*Phi(h * n) + Phi(h * (n+1))))
+
+    for m in range(2, U.shape[0]):
+        for n in range(1, U.shape[1] - 1):
+            U[m][n] = ASqr*tau**2/h**2 *(U[m-1][n+1] - 2*U[m-1][n] + U[m-1][n-1]) + tau*F(h*n, tau*(m-1))\
+                      + 2*U[m-1][n] - U[m-2][n]
+
+    for m in range(2, U.shape[0]):
+        U[m][0] = (2*h*GammaLeft(tau) - AlphaLeft * (U[m][2] - 4*U[m][1])) / (2*BettaLeft*h + 3*AlphaLeft)
+        U[m][U.shape[1] - 1] = (2*h*GammaRight(tau) - AlphaRight * (U[m][U.shape[1] - 3] - 4*U[m][U.shape[1] - 2])) / (2*h*BettaRight + AlphaRight*3)
+
+    return U
+
+def SolveTrue(U, h, tau):
+    for m in range(0, U.shape[0]):
+        for n in range(0, U.shape[1]):
+            U[m][n] = 3/2 * math.log(1+tau*m+h*n**2)
+
+    return U
+
+
+T = 10
+L = 1
+N = 21
+M = 201
+h = L/(N-1)
+tau = T/(M-1)
+
+# U0 = np.fromfunction(lambda t, x: 3/2 * math.log(1+t+x**2), (M, N), dtype=float)
+# print(U0)
+
+U0 = np.zeros((M,N))
+print(SolveTrue(U0, h, tau))
+
+vectorTau = numpy.linspace(0, T, int(T/tau))
+vectorX = numpy.linspace(0, L, int(L/h))
+
+U1 = np.zeros((M,N))
+print(SolveFirstOrder(U1, h, tau))
+
+U2 = np.zeros((M,N))
+print(SolveSecondOrder(U2, h, tau))
+
+fig = go.Figure(data=[go.Surface(z=U1, x=vectorX, y=vectorTau)])
+fig1 = go.Figure(data=[go.Surface(z=U2, x=vectorX, y=vectorTau)])
+fig2 = go.Figure(data=[go.Surface(z=U0, x=vectorX, y=vectorTau)])
+fig.show()
+fig1.show()
+fig2.show()
