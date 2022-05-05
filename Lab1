@@ -2,9 +2,10 @@ import numpy
 import plotly.graph_objects as go
 import numpy as np
 import math
+from sympy import *
 
 def Phi(x):
-    return 3/2 * math.log(1+x**2)
+    return 3/2 * np.log(1+x**2)
 
 def Psi(x):
     return 3/2/(1+x**2)
@@ -15,14 +16,23 @@ def F(x,t):
 ASqr = 1/2
 AlphaLeft = 2
 BettaLeft = -1
-AlphaRight = 1
-BettaRight = 0
+AlphaRight = 0
+BettaRight = 1
 
 def GammaLeft(t):
-    return 3*math.log(1+t)
+    return 3*np.log(1+t)
 
 def GammaRight(t):
     return 3/(2+t)
+
+def Phi1d2(x):
+    y = Symbol('x')
+    func = (lambda x: 3/2 * log(1+x**2))(y)
+
+    func = func.diff().diff()
+    func = lambdify(y, func, 'numpy')
+
+    return func(x)
 
 def SolveFirstOrder(U, h, tau):
     for n in range(U.shape[1]):
@@ -31,37 +41,42 @@ def SolveFirstOrder(U, h, tau):
 
     for m in range(2, U.shape[0]):
         for n in range(1, U.shape[1] - 1):
-            U[m][n] = ASqr*tau**2/h**2 *(U[m-1][n+1] - 2*U[m-1][n] + U[m-1][n-1]) + tau*F(h*n, tau*(m-1))\
+            U[m][n] = ASqr*tau**2/h**2 *(U[m-1][n+1] - 2*U[m-1][n] + U[m-1][n-1]) + tau**2*F(h*n, tau*(m-1))\
                       + 2*U[m-1][n] - U[m-2][n]
-
-    for m in range(2, U.shape[0]):
-        U[m][0] = (GammaLeft(tau*m) - BettaLeft/h * U[m][1]) * h/(AlphaLeft*h - BettaLeft)
-        U[m][U.shape[1] - 1] = GammaRight(tau*m) + U[m][U.shape[1] - 2]
+        U[m][ 0] = (GammaLeft(tau*m)*h - BettaLeft * U[m][1])/(AlphaLeft*h - BettaLeft)
+        U[m][-1] = (BettaRight*U[m][-2] + h*GammaRight(tau*m)) / (BettaRight + h*AlphaRight)
 
     return U
 
 def SolveSecondOrder(U, h, tau):
     for n in range(U.shape[1]):
         U[0][n] = Phi(h * n)
-        U[1][n] = Phi(h * n) + tau*Psi(h * n) + tau**2/2/h**2 * (ASqr**2 * (Phi(h * (n-1)) - 2*Phi(h * n) + Phi(h * (n+1))))
+        U[1][n] = Phi(h * n) + tau*Psi(h * n) + tau**2/2 * (ASqr * Phi1d2(h*n) + F(h*n, 0))
 
     for m in range(2, U.shape[0]):
         for n in range(1, U.shape[1] - 1):
-            U[m][n] = ASqr*tau**2/h**2 *(U[m-1][n+1] - 2*U[m-1][n] + U[m-1][n-1]) + tau*F(h*n, tau*(m-1))\
+            U[m][n] = ASqr*tau**2/h**2 *(U[m-1][n+1] - 2*U[m-1][n] + U[m-1][n-1]) + tau**2*F(h*n, tau*(m-1))\
                       + 2*U[m-1][n] - U[m-2][n]
-
-    for m in range(2, U.shape[0]):
-        U[m][0] = (2*h*GammaLeft(tau) - AlphaLeft * (U[m][2] - 4*U[m][1])) / (2*BettaLeft*h + 3*AlphaLeft)
-        U[m][U.shape[1] - 1] = (2*h*GammaRight(tau) - AlphaRight * (U[m][U.shape[1] - 3] - 4*U[m][U.shape[1] - 2])) / (2*h*BettaRight + AlphaRight*3)
+        U[m][0] = (2 * h * GammaLeft(tau*m) + BettaLeft * (U[m][2] - 4 * U[m][1])) / (2 * AlphaLeft * h - 3 * BettaLeft)
+        U[m][U.shape[1] - 1] = (2 * h * GammaRight(tau*m) - BettaRight * (U[m][U.shape[1] - 3] - 4 * U[m][U.shape[1] - 2])) / (2 * h * AlphaRight + BettaRight * 3)
 
     return U
 
 def SolveTrue(U, h, tau):
     for m in range(0, U.shape[0]):
         for n in range(0, U.shape[1]):
-            U[m][n] = 3/2 * math.log(1+tau*m+h*n**2)
+            U[m][n] = 3/2 * math.log(1+tau*m+(h*n)**2)
 
     return U
+
+def MaxMistake(trueU, U):
+    mistake = 0
+    for m in range(0, U.shape[0]):
+        for n in range(0, U.shape[1]):
+            if mistake < abs(U[m][n] - trueU[m][n]):
+                mistake = abs(U[m][n] - trueU[m][n])
+
+    return mistake
 
 
 T = 10
@@ -86,9 +101,14 @@ print(SolveFirstOrder(U1, h, tau))
 U2 = np.zeros((M,N))
 print(SolveSecondOrder(U2, h, tau))
 
+print("Ошибка для первого порядка точности ", MaxMistake(U0, U1))
+print("Ошибка для второго порядка точности ", MaxMistake(U0, U2))
 fig = go.Figure(data=[go.Surface(z=U1, x=vectorX, y=vectorTau)])
+fig.update_layout(title='Первый порядок')
 fig1 = go.Figure(data=[go.Surface(z=U2, x=vectorX, y=vectorTau)])
+fig1.update_layout(title='Второй порядок')
 fig2 = go.Figure(data=[go.Surface(z=U0, x=vectorX, y=vectorTau)])
+fig2.update_layout(title='Истинное решение')
 fig.show()
 fig1.show()
 fig2.show()
