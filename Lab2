@@ -1,0 +1,162 @@
+import numpy as np
+import matplotlib.pyplot as plt
+from jedi.api.refactoring import inline
+from matplotlib.widgets import Slider
+import plotly.graph_objects as gr
+from ipywidgets import interact, interactive, fixed, interact_manual
+import ipywidgets as widgets
+import math
+
+def Phi(x):
+    return math.sqrt(1+x)
+
+def F(x,t):
+    return (2*x*(1+x+x*t)+(1+t)**2)/4/(1+x+x*t)**(3/2)
+
+def Solution(x,t):
+    return np.sqrt(1+x+x*t)
+
+ASqr = 1
+AlphaLeft = 2
+BettaLeft = 1
+AlphaRight = 2
+BettaRight = 1
+
+h = 0.05
+l = 1
+N = int(1/h)+1
+X = np.linspace(0, 1, num=N)
+t = 1
+dt = 0.05
+M = int(t / dt) + 1
+T = np.linspace(0, t, num=M)
+sigma = 0.5
+a=1
+
+def GammaLeft(t):
+    return 2+t
+
+def GammaRight(t):
+    return (3+2*t)/math.sqrt(2+t)
+
+
+def TridiagMatrixMethod(m, u, l=l, AlphaLeft=AlphaLeft, BettaLeft=BettaLeft, GammaLeft=GammaLeft, AlphaRight=AlphaRight, BettaRight=BettaRight, GammaRight=GammaRight, sigma=sigma, h=h, N=N, dt=dt, X=X, T=T,
+                        F=F, order=1, type="3D"):
+    # Функция "прямого хода" по матрице
+    def forward_path(A, B, C, D, n=N - 1):
+        AA = [-C[0] / B[0]]
+        BB = [D[0] / B[0]]
+        for i in range(1, n):
+            AA.append(- C[i] / (B[i] + A[i] * AA[i - 1]))
+            BB.append((D[i] - A[i] * BB[i - 1]) / (B[i] + A[i] * AA[i - 1]))
+        return AA, BB
+
+    # Функция "обратного хода" по матрице
+    def backward_path(AA, BB, n=N - 1):
+        Y = []
+        Y.append(BB[n - 1])
+        for i in range(n - 2, -1, -1):
+            Y.append(BB[i] + AA[i] * Y[n - i - 2])
+        return Y[::-1]
+
+    X = np.linspace(0, l, N)
+
+    cur = a * a * dt / h / h
+
+    A = [0]
+    B = [0]
+    C = [0]
+    D = [0]
+
+    for i in range(1, N - 1):
+        A.append(cur * sigma)
+        B.append((-2) * cur * sigma - 1)
+        C.append(cur * sigma)
+        if type == "3D":
+            D.append(-u[m][i] - dt * F(X[i], T[m] + dt / 2) + (sigma - 1) * a * a * dt / h / h * (
+                        u[m][i + 1] - 2 * u[m][i] + u[m][i - 1]))
+        elif type == "2D":
+            D.append(-u[i] - dt * F(X[i], T[m] + dt / 2) + (sigma - 1) * a * a * dt / h / h * (
+                        u[i + 1] - 2 * u[i] + u[i - 1]))
+        else:
+            raise ValueError("Incorrect order of algorithm (avail.: 1, 2)")
+
+    if order == 1:
+        A[0] = (0)
+        B[0] = (-AlphaLeft / h + BettaLeft)
+        C[0] = (AlphaLeft / h)
+        D[0] = (GammaLeft(T[m + 1]))
+
+        A.append(-AlphaRight / h)
+        B.append(AlphaRight / h + BettaRight)
+        C.append(0)
+        D.append(GammaRight(T[m + 1]))
+
+    elif order == 2:
+
+        A[0] = (0)
+        B[0] = (AlphaLeft - h * BettaLeft + AlphaLeft / (2 * cur * sigma))
+        C[0] = (-AlphaLeft)
+        A.append((AlphaRight))
+        B.append(-(AlphaRight + h * BettaRight + AlphaRight / (2 * cur * sigma)))
+        C.append(0)
+        if type == "3D":
+            D[0] = (-h * GammaLeft(T[m + 1]) + AlphaLeft / (2 * cur * sigma) * (u[m][0] + dt * F(X[0], T[m] + dt / 2)) + (
+                        sigma - 1) / sigma * ((AlphaLeft - h * BettaLeft) * u[m][0] - AlphaLeft * u[m][1] + h * GammaLeft(T[m])))
+            D.append(((-h * GammaRight(T[m + 1]) - AlphaRight / (2 * cur * sigma) * (u[m][-1] + dt * F(X[-1], T[m] + dt / 2)) - (
+                        sigma - 1) / sigma * ((AlphaRight + h * BettaRight) * u[m][-1] - AlphaRight * u[m][-2] - h * GammaRight(T[m])))))
+        elif type == "2D":
+            D[0] = (-h * GammaLeft(T[m + 1]) + AlphaLeft / (2 * cur * sigma) * (u[0] + dt * F(X[0], T[m] + dt / 2)) + (
+                        sigma - 1) / sigma * ((AlphaLeft - h * BettaLeft) * u[0] - AlphaLeft * u[1] + h * GammaLeft(T[m])))
+            D.append(((-h * GammaRight(T[m + 1]) - AlphaRight / (2 * cur * sigma) * (u[-1] + dt * F(X[-1], T[m] + dt / 2)) - (
+                        sigma - 1) / sigma * ((AlphaRight + h * BettaRight) * u[-1] - AlphaRight * u[-2] - h * GammaRight(T[m])))))
+        else:
+            raise ValueError("Incorrect order of algorithm (avail.: 1, 2)")
+    else:
+        raise ValueError("Incorrect order of algorithm (avail.: 1, 2)")
+
+    AA, BB = forward_path(A, B, C, D, N)
+    Y = backward_path(AA, BB, N)
+
+    return Y
+
+def error_graph(X=X, T=T, order=1):
+    Xs, Ts = np.meshgrid(X, T)
+    fig = gr.Figure(data=[gr.Surface(z=np.abs(Solution(Xs, Ts) - Solver_h(order=order)), x=Xs, y=Ts)])
+    fig.update_layout(scene = dict(
+                        xaxis_title='x',
+                        yaxis_title='t',
+                        zaxis_title='|u(x,t)-u0(x,t)|'),
+                        width=1000,
+                        height=600,
+                        margin=dict(r=10, b=20, l=10, t=60),
+                        title=f"Модуль ошибки в каждой точке сетки ({order} порядок точности производной)")
+    fig.show()
+
+def Solver_h(X=X, T=T, order=1):
+    N = len(X)
+    M = len(T)
+    u = np.zeros(shape=(M, N))
+    u[0] = [Phi(x) for x in X]
+    for i in range(1, M):
+        u[i] = TridiagMatrixMethod(m=i-1, u=u, X=X, T=T, N=N, order=order)
+    return u
+
+def max_error(X=X, T=T, order=1):
+    Xs, Ts = np.meshgrid(X, T)
+    return np.max(np.abs(Solution(Xs, Ts) - Solver_h(X=X, T=T, order=order)))
+
+U1 = Solver_h()
+fig1 = gr.Figure(data=[gr.Surface(z=U1, x=X, y=T)])
+fig1.update_layout(title='Первый порядок')
+fig1.show()
+
+U2 = Solver_h(order=2)
+fig2 = gr.Figure(data=[gr.Surface(z=U2, x=X, y=T)])
+fig2.update_layout(title='Второй порядок')
+fig2.show()
+
+error_graph()
+error_graph(order=2)
+print("Ошибка для первого порядка точности ",max_error())
+print("Ошибка для второго порядка точности ",max_error(order=2))
